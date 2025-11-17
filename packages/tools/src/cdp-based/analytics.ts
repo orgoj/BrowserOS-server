@@ -534,6 +534,7 @@ async function startMonitoring(
   const monitoringScript = `
     (function() {
       const KEYS = ${JSON.stringify(STORAGE_KEYS)};
+      const MAX_EVENTS = 1000; // Circular buffer limit to prevent DoS/memory issues
 
       // Check if monitoring proxies are already installed on THIS page instance
       if (window.__BROWSEROS_MONITORING_SETUP__) {
@@ -586,6 +587,12 @@ async function startMonitoring(
             eventSnapshot.id = 'evt_' + eventId;
 
             events.push(eventSnapshot);
+
+            // Implement circular buffer: remove oldest events if limit exceeded
+            if (events.length > MAX_EVENTS) {
+              events.splice(0, events.length - MAX_EVENTS);
+            }
+
             localStorage.setItem(KEYS.EVENTS, JSON.stringify(events));
             localStorage.setItem(KEYS.NEXT_EVENT_ID, String(eventId + 1));
 
