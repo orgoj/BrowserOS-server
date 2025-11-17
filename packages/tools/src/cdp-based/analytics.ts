@@ -515,7 +515,8 @@ async function startMonitoring(
   const monitoringScript = `
     (function() {
       const KEYS = ${JSON.stringify(STORAGE_KEYS)};
-      const MAX_EVENTS = 1000; // Circular buffer limit to prevent DoS/memory issues
+      const MAX_EVENTS = 1000;
+      const DEBUG = false; // Set to true to enable debug logging
 
       // Check if monitoring proxies are already installed on THIS page instance
       if (window.__BROWSEROS_MONITORING_SETUP__) {
@@ -650,7 +651,9 @@ async function startMonitoring(
             localStorage.setItem(KEYS.EVENTS, JSON.stringify(events));
             localStorage.setItem(KEYS.NEXT_EVENT_ID, String(eventId + 1));
 
-            console.log('[BrowserOS Analytics] Captured:', eventSnapshot.id, data.event || 'unknown');
+            if (DEBUG) {
+              console.log('[BrowserOS Analytics] Captured:', eventSnapshot.id, data.event || 'unknown');
+            }
           } catch (e) {
             console.error('[BrowserOS Analytics] Capture error:', e);
           }
@@ -678,7 +681,9 @@ async function startMonitoring(
           // This ensures GTM sees identical behavior and timing
           return window.__BROWSEROS_ORIGINAL_PUSH__.apply(this, args);
         };
-        console.log('[BrowserOS Analytics] Monitoring dataLayer.push()');
+        if (DEBUG) {
+          console.log('[BrowserOS Analytics] Monitoring dataLayer.push()');
+        }
       }
 
       // Monitor gtag() using transparent proxy pattern
@@ -702,10 +707,14 @@ async function startMonitoring(
           // This ensures GA4 sees identical behavior and timing
           return window.__BROWSEROS_ORIGINAL_GTAG__.apply(this, args);
         };
-        console.log('[BrowserOS Analytics] Monitoring gtag()');
+        if (DEBUG) {
+          console.log('[BrowserOS Analytics] Monitoring gtag()');
+        }
       }
 
-      console.log('[BrowserOS Analytics] Monitoring started successfully');
+      if (DEBUG) {
+        console.log('[BrowserOS Analytics] Monitoring started successfully');
+      }
     })();
   `;
 
