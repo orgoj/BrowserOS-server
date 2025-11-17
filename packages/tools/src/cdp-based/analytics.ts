@@ -1,6 +1,16 @@
 /**
  * @license
  * Copyright 2025 BrowserOS
+ *
+ * Web Analytics Tool - READ-ONLY analytics inspection
+ *
+ * SAFETY GUARANTEES:
+ * - This tool is completely READ-ONLY
+ * - Does NOT modify window.dataLayer, GTM, or GA4 configurations
+ * - Does NOT interfere with analytics tracking
+ * - Monitoring uses isolated namespace (__BROWSEROS_ANALYTICS_MONITOR__)
+ * - Automatic cleanup ensures no traces are left on the page
+ * - All analysis is passive observation only
  */
 import z from 'zod';
 
@@ -19,7 +29,8 @@ const ACTION_TYPES = [
 export const webAnalytics = defineTool({
   name: 'web_analytics',
   description: `Analyze web analytics implementations including dataLayer, Google Tag Manager (GTM), and Google Analytics 4 (GA4).
-Extract analytics data, validate configurations, and provide actionable insights for debugging tracking issues.`,
+Extract analytics data, validate configurations, and provide actionable insights for debugging tracking issues.
+This tool is READ-ONLY and does not modify or interfere with existing analytics implementations.`,
   annotations: {
     category: ToolCategories.ANALYTICS,
     readOnlyHint: true,
@@ -29,12 +40,12 @@ Extract analytics data, validate configurations, and provide actionable insights
       .enum(ACTION_TYPES)
       .describe(
         `Action to perform:
-- analyze_datalayer: Extract and analyze all dataLayer entries
-- analyze_gtm: Analyze Google Tag Manager configuration
-- analyze_ga4: Analyze Google Analytics 4 implementation
-- full_analysis: Complete analytics audit (dataLayer + GTM + GA4)
-- monitor_events: Real-time monitoring of dataLayer/GA4 events
-- stop_monitoring: Stop active event monitoring`,
+- analyze_datalayer: Extract and analyze all dataLayer entries (READ-ONLY)
+- analyze_gtm: Analyze Google Tag Manager configuration (READ-ONLY)
+- analyze_ga4: Analyze Google Analytics 4 implementation (READ-ONLY)
+- full_analysis: Complete analytics audit (READ-ONLY, combines all three)
+- monitor_events: Passive real-time monitoring of dataLayer/GA4 events (does NOT interfere with tracking)
+- stop_monitoring: Stop active event monitoring and cleanup`,
       ),
     eventFilter: z
       .string()
@@ -472,10 +483,13 @@ async function monitorEvents(
 ) {
   const monitorDuration = duration || 30;
 
-  response.appendResponseLine('## Event Monitoring');
+  response.appendResponseLine('## Event Monitoring (Passive Mode)');
   response.appendResponseLine('');
   response.appendResponseLine(
-    `Starting real-time event monitoring for ${monitorDuration} seconds...`,
+    `Starting READ-ONLY event monitoring for ${monitorDuration} seconds...`,
+  );
+  response.appendResponseLine(
+    '*This monitoring does NOT interfere with GTM/GA4 tracking.*',
   );
   if (eventFilter) {
     response.appendResponseLine(`Filter: Events matching "${eventFilter}"`);
@@ -489,10 +503,20 @@ async function monitorEvents(
         return {success: false, error: 'dataLayer not found'};
       }
 
-      w._analyticsMonitor = {
-        events: [],
+      // Use unique namespace to avoid conflicts with page code
+      const monitorKey = '__BROWSEROS_ANALYTICS_MONITOR__';
+
+      // Safety check: don't override if already exists
+      if (w[monitorKey]) {
+        return {success: false, error: 'Monitoring already active'};
+      }
+
+      // Store only metadata, don't modify dataLayer or GTM/GA4
+      w[monitorKey] = {
         startLength: w.dataLayer.length,
+        startTime: Date.now(),
         filter,
+        readOnly: true, // Mark as read-only observer
       };
 
       return {success: true};
@@ -509,18 +533,24 @@ async function monitorEvents(
 
   const events = await page.evaluate(() => {
     const w = window as any;
-    if (!w._analyticsMonitor || !w.dataLayer) {
+    const monitorKey = '__BROWSEROS_ANALYTICS_MONITOR__';
+
+    if (!w[monitorKey] || !w.dataLayer) {
       return [];
     }
 
-    const monitor = w._analyticsMonitor;
+    const monitor = w[monitorKey];
+
+    // Read-only: only slice existing dataLayer, don't modify anything
     const newEntries = w.dataLayer.slice(monitor.startLength);
 
     const filtered = monitor.filter
       ? newEntries.filter((entry: any) => entry.event === monitor.filter)
       : newEntries;
 
-    delete w._analyticsMonitor;
+    // Cleanup: remove our monitoring object
+    delete w[monitorKey];
+
     return filtered;
   });
 
@@ -545,18 +575,27 @@ async function monitorEvents(
 }
 
 async function stopMonitoring(page: any, response: any) {
-  await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const w = window as any;
-    if (w._analyticsMonitor) {
-      delete w._analyticsMonitor;
-      return true;
+    const monitorKey = '__BROWSEROS_ANALYTICS_MONITOR__';
+
+    if (w[monitorKey]) {
+      delete w[monitorKey];
+      return {stopped: true};
     }
-    return false;
+    return {stopped: false};
   });
 
   response.appendResponseLine('## Event Monitoring Stopped');
   response.appendResponseLine('');
-  response.appendResponseLine(
-    'Event monitoring has been stopped and cleanup completed.',
-  );
+
+  if (result.stopped) {
+    response.appendResponseLine(
+      'Event monitoring has been stopped and cleanup completed.',
+    );
+  } else {
+    response.appendResponseLine(
+      'No active monitoring found. Nothing to clean up.',
+    );
+  }
 }
