@@ -29,6 +29,7 @@ import {
 import {createHttpMcpServer, shutdownMcpServer} from '@browseros/mcp';
 import {
   allCdpTools,
+  allAnalyticsTools,
   allControllerTools,
   type ToolDefinition,
 } from '@browseros/tools';
@@ -136,13 +137,22 @@ function mergeTools(
     controllerContext,
   );
   const klavisTools = process.env.KLAVIS_API_KEY ? allKlavisTools : [];
+  const analyticsTools =
+    process.env.ENABLE_ANALYTICS_TOOLS === 'true' && cdpContext
+      ? allAnalyticsTools
+      : [];
 
   logger.info(
-    `Total tools available: ${cdpTools.length + wrappedControllerTools.length + klavisTools.length} ` +
-      `(${cdpTools.length} CDP + ${wrappedControllerTools.length} extension + ${klavisTools.length} Klavis)`,
+    `Total tools available: ${cdpTools.length + wrappedControllerTools.length + klavisTools.length + analyticsTools.length} ` +
+      `(${cdpTools.length} CDP + ${wrappedControllerTools.length} extension + ${klavisTools.length} Klavis + ${analyticsTools.length} analytics)`,
   );
 
-  return [...cdpTools, ...wrappedControllerTools, ...klavisTools];
+  return [
+    ...cdpTools,
+    ...wrappedControllerTools,
+    ...klavisTools,
+    ...analyticsTools,
+  ];
 }
 
 function startMcpServer(config: {

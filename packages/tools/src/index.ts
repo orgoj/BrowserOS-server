@@ -6,7 +6,7 @@
  */
 
 // Export CDP-based tools (Chrome DevTools Protocol)
-export {allCdpTools} from './cdp-based/index.js';
+export {allCdpTools, allAnalyticsTools} from './cdp-based/index.js';
 export * as cdpTools from './cdp-based/index.js';
 
 // Export controller-based tools (BrowserOS Controller via Extension)

@@ -18,11 +18,10 @@ import * as snapshotTools from './snapshot.js';
 
 /**
  * All available CDP-based browser automation tools
+ * (excluding opt-in tools like analytics)
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const allCdpTools: Array<ToolDefinition<any>> = [
-  //FIXME: nikhil - figure out the better wway to enable/disable tools
-  ...Object.values(analyticsTools),
   ...Object.values(consoleTools),
   // ...Object.values(emulationTools),
   // ...Object.values(inputTools),
@@ -33,6 +32,15 @@ export const allCdpTools: Array<ToolDefinition<any>> = [
   // ...Object.values(screenshotTools),
   // ...Object.values(scriptTools),
   // ...Object.values(snapshotTools),
+];
+
+/**
+ * Analytics tools - opt-in only (not for typical users)
+ * Enable by setting ENABLE_ANALYTICS_TOOLS=true environment variable
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const allAnalyticsTools: Array<ToolDefinition<any>> = [
+  ...Object.values(analyticsTools),
 ];
 
 // Re-export individual tool modules for selective imports
