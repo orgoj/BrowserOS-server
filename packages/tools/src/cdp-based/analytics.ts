@@ -22,7 +22,8 @@ const ACTION_TYPES = [
   'analyze_gtm',
   'analyze_ga4',
   'full_analysis',
-  'monitor_events',
+  'start_monitoring',
+  'get_events',
   'stop_monitoring',
 ] as const;
 
@@ -44,8 +45,9 @@ This tool is READ-ONLY and does not modify or interfere with existing analytics 
 - analyze_gtm: Analyze Google Tag Manager configuration (READ-ONLY)
 - analyze_ga4: Analyze Google Analytics 4 implementation (READ-ONLY)
 - full_analysis: Complete analytics audit (READ-ONLY, combines all three)
-- monitor_events: Passive real-time monitoring of dataLayer/GA4 events (does NOT interfere with tracking)
-- stop_monitoring: Stop active event monitoring and cleanup`,
+- start_monitoring: Start persistent event monitoring (survives page reloads and navigation)
+- get_events: Get captured events since last read (default: only new events)
+- stop_monitoring: Stop monitoring and cleanup all data`,
       ),
     eventFilter: z
       .string()
@@ -53,13 +55,19 @@ This tool is READ-ONLY and does not modify or interfere with existing analytics 
       .describe(
         'Optional filter for event names (e.g., "purchase", "page_view"). Used with analyze_datalayer and monitor_events.',
       ),
-    duration: z
+    returnAll: z
+      .boolean()
+      .optional()
+      .describe(
+        'Return all captured events instead of just new ones. Used with get_events. Default: false (only new events).',
+      ),
+    lastN: z
       .number()
       .int()
       .positive()
       .optional()
       .describe(
-        'Duration in seconds for event monitoring. Used with monitor_events. Default: 30 seconds.',
+        'Return only the last N events. Used with get_events. If specified, overrides returnAll.',
       ),
     containerId: z
       .string()
@@ -76,8 +84,14 @@ This tool is READ-ONLY and does not modify or interfere with existing analytics 
   },
   handler: async (request, response, context) => {
     const page = context.getSelectedPage();
-    const {action, eventFilter, duration, containerId, measurementId} =
-      request.params;
+    const {
+      action,
+      eventFilter,
+      containerId,
+      measurementId,
+      returnAll,
+      lastN,
+    } = request.params;
 
     try {
       switch (action) {
@@ -93,8 +107,11 @@ This tool is READ-ONLY and does not modify or interfere with existing analytics 
         case 'full_analysis':
           await fullAnalysis(page, response);
           break;
-        case 'monitor_events':
-          await monitorEvents(page, response, context, eventFilter, duration);
+        case 'start_monitoring':
+          await startMonitoring(page, response, eventFilter);
+          break;
+        case 'get_events':
+          await getEvents(page, response, returnAll, lastN);
           break;
         case 'stop_monitoring':
           await stopMonitoring(page, response);
@@ -474,128 +491,332 @@ async function fullAnalysis(page: any, response: any) {
   );
 }
 
-async function monitorEvents(
+// Storage keys for localStorage
+const STORAGE_KEYS = {
+  EVENTS: '__BROWSEROS_ANALYTICS_EVENTS__',
+  LAST_READ_INDEX: '__BROWSEROS_ANALYTICS_LAST_READ__',
+  MONITORING_ACTIVE: '__BROWSEROS_ANALYTICS_ACTIVE__',
+  EVENT_FILTER: '__BROWSEROS_ANALYTICS_FILTER__',
+  NEXT_EVENT_ID: '__BROWSEROS_ANALYTICS_NEXT_ID__',
+} as const;
+
+async function startMonitoring(
   page: any,
   response: any,
-  context: any,
   eventFilter?: string,
-  duration?: number,
 ) {
-  const monitorDuration = duration || 30;
-
-  response.appendResponseLine('## Event Monitoring (Passive Mode)');
+  response.appendResponseLine('## Start Event Monitoring');
   response.appendResponseLine('');
   response.appendResponseLine(
-    `Starting READ-ONLY event monitoring for ${monitorDuration} seconds...`,
+    '**Starting persistent READ-ONLY event monitoring...**',
   );
   response.appendResponseLine(
-    '*This monitoring does NOT interfere with GTM/GA4 tracking.*',
+    '*Monitoring will survive page reloads and navigation.*',
+  );
+  response.appendResponseLine(
+    '*This does NOT interfere with GTM/GA4 tracking.*',
   );
   if (eventFilter) {
-    response.appendResponseLine(`Filter: Events matching "${eventFilter}"`);
+    response.appendResponseLine(`**Filter**: Events matching "${eventFilter}"`);
   }
   response.appendResponseLine('');
 
-  const setupResult = await page.evaluate(
-    (filter: string | undefined) => {
-      const w = window as any;
-      if (!w.dataLayer || !Array.isArray(w.dataLayer)) {
-        return {success: false, error: 'dataLayer not found'};
+  // Install monitoring script that persists across page loads
+  const monitoringScript = `
+    (function() {
+      const KEYS = ${JSON.stringify(STORAGE_KEYS)};
+
+      // Check if already monitoring
+      if (localStorage.getItem(KEYS.MONITORING_ACTIVE) === 'true') {
+        console.log('[BrowserOS Analytics] Monitoring already active');
+        return;
       }
 
-      // Use unique namespace to avoid conflicts with page code
-      const monitorKey = '__BROWSEROS_ANALYTICS_MONITOR__';
+      // Initialize storage
+      localStorage.setItem(KEYS.MONITORING_ACTIVE, 'true');
+      localStorage.setItem(KEYS.EVENT_FILTER, ${JSON.stringify(eventFilter || '')});
+      localStorage.setItem(KEYS.LAST_READ_INDEX, '0');
+      localStorage.setItem(KEYS.NEXT_EVENT_ID, '1');
 
-      // Safety check: don't override if already exists
-      if (w[monitorKey]) {
-        return {success: false, error: 'Monitoring already active'};
+      if (!localStorage.getItem(KEYS.EVENTS)) {
+        localStorage.setItem(KEYS.EVENTS, JSON.stringify([]));
       }
 
-      // Store only metadata, don't modify dataLayer or GTM/GA4
-      w[monitorKey] = {
-        startLength: w.dataLayer.length,
-        startTime: Date.now(),
-        filter,
-        readOnly: true, // Mark as read-only observer
-      };
+      // Helper to capture event with metadata
+      function captureEvent(data, source) {
+        try {
+          const events = JSON.parse(localStorage.getItem(KEYS.EVENTS) || '[]');
+          const eventId = parseInt(localStorage.getItem(KEYS.NEXT_EVENT_ID) || '1');
+          const filter = localStorage.getItem(KEYS.EVENT_FILTER);
 
-      return {success: true};
+          // Apply filter if set
+          if (filter && data.event && data.event !== filter) {
+            return;
+          }
+
+          const capturedEvent = {
+            id: 'evt_' + eventId,
+            timestamp: new Date().toISOString(),
+            timestampMs: Date.now(),
+            source: source,
+            data: data,
+            url: window.location.href,
+          };
+
+          events.push(capturedEvent);
+          localStorage.setItem(KEYS.EVENTS, JSON.stringify(events));
+          localStorage.setItem(KEYS.NEXT_EVENT_ID, String(eventId + 1));
+
+          console.log('[BrowserOS Analytics] Captured:', capturedEvent.id, data.event || 'unknown');
+        } catch (e) {
+          console.error('[BrowserOS Analytics] Capture error:', e);
+        }
+      }
+
+      // Monitor dataLayer if it exists
+      if (window.dataLayer && Array.isArray(window.dataLayer)) {
+        const originalPush = window.dataLayer.push;
+        window.dataLayer.push = function(...args) {
+          // Capture each argument
+          args.forEach(item => {
+            captureEvent(item, 'dataLayer');
+          });
+          // Call original push (don't interfere with tracking)
+          return originalPush.apply(this, args);
+        };
+        console.log('[BrowserOS Analytics] Monitoring dataLayer.push()');
+      }
+
+      // Monitor gtag if it exists
+      if (typeof window.gtag === 'function') {
+        const originalGtag = window.gtag;
+        window.gtag = function(...args) {
+          captureEvent({
+            command: args[0],
+            params: args.slice(1)
+          }, 'gtag');
+          return originalGtag.apply(this, args);
+        };
+        console.log('[BrowserOS Analytics] Monitoring gtag()');
+      }
+
+      console.log('[BrowserOS Analytics] Monitoring started successfully');
+    })();
+  `;
+
+  // Install script that runs on every page load (survives navigation)
+  await page.evaluateOnNewDocument(monitoringScript);
+
+  // Also run it now for current page
+  const result = await page.evaluate(monitoringScript);
+
+  response.appendResponseLine('✅ **Monitoring started successfully**');
+  response.appendResponseLine('');
+  response.appendResponseLine('**Next steps:**');
+  response.appendResponseLine('1. Interact with the page (click, submit forms, etc.)');
+  response.appendResponseLine(
+    '2. Navigate to other pages (monitoring persists)',
+  );
+  response.appendResponseLine(
+    '3. Use `get_events` to retrieve captured events',
+  );
+  response.appendResponseLine('4. Use `stop_monitoring` when done');
+  response.appendResponseLine('');
+  response.appendResponseLine(
+    '**Note**: Events are stored in localStorage with timestamps and unique IDs.',
+  );
+}
+
+async function getEvents(
+  page: any,
+  response: any,
+  returnAll?: boolean,
+  lastN?: number,
+) {
+  const result = await page.evaluate(
+    (KEYS: any, returnAllEvents: boolean, lastNEvents?: number) => {
+      if (localStorage.getItem(KEYS.MONITORING_ACTIVE) !== 'true') {
+        return {
+          active: false,
+          error: 'Monitoring not active. Use start_monitoring first.',
+        };
+      }
+
+      try {
+        const allEvents = JSON.parse(
+          localStorage.getItem(KEYS.EVENTS) || '[]',
+        );
+        const lastReadIndex = parseInt(
+          localStorage.getItem(KEYS.LAST_READ_INDEX) || '0',
+        );
+
+        let eventsToReturn;
+
+        if (lastNEvents !== undefined) {
+          // Return last N events
+          eventsToReturn = allEvents.slice(-lastNEvents);
+        } else if (returnAllEvents) {
+          // Return all events
+          eventsToReturn = allEvents;
+        } else {
+          // Return only new events since last read
+          eventsToReturn = allEvents.slice(lastReadIndex);
+        }
+
+        // Update last read index to current total (only if not using lastN or returnAll)
+        if (!returnAllEvents && lastNEvents === undefined) {
+          localStorage.setItem(KEYS.LAST_READ_INDEX, String(allEvents.length));
+        }
+
+        return {
+          active: true,
+          events: eventsToReturn,
+          totalEvents: allEvents.length,
+          newEvents: allEvents.length - lastReadIndex,
+          lastReadIndex: lastReadIndex,
+          filter: localStorage.getItem(KEYS.EVENT_FILTER) || null,
+        };
+      } catch (e: any) {
+        return {
+          active: true,
+          error: 'Failed to parse events: ' + e.message,
+        };
+      }
     },
-    eventFilter,
+    STORAGE_KEYS,
+    returnAll || false,
+    lastN,
   );
 
-  if (!setupResult.success) {
-    response.appendResponseLine(`**Error**: ${setupResult.error}`);
+  response.appendResponseLine('## Captured Analytics Events');
+  response.appendResponseLine('');
+
+  if (!result.active) {
+    response.appendResponseLine(`**Error**: ${result.error}`);
+    response.appendResponseLine('');
+    response.appendResponseLine('Use `start_monitoring` to begin tracking.');
     return;
   }
 
-  await new Promise(resolve => setTimeout(resolve, monitorDuration * 1000));
+  if (result.error) {
+    response.appendResponseLine(`**Error**: ${result.error}`);
+    return;
+  }
 
-  const events = await page.evaluate(() => {
-    const w = window as any;
-    const monitorKey = '__BROWSEROS_ANALYTICS_MONITOR__';
-
-    if (!w[monitorKey] || !w.dataLayer) {
-      return [];
-    }
-
-    const monitor = w[monitorKey];
-
-    // Read-only: only slice existing dataLayer, don't modify anything
-    const newEntries = w.dataLayer.slice(monitor.startLength);
-
-    const filtered = monitor.filter
-      ? newEntries.filter((entry: any) => entry.event === monitor.filter)
-      : newEntries;
-
-    // Cleanup: remove our monitoring object
-    delete w[monitorKey];
-
-    return filtered;
-  });
-
-  response.appendResponseLine(`**Captured ${events.length} event(s)**`);
+  response.appendResponseLine('**Monitoring Status**: ✅ Active');
+  if (result.filter) {
+    response.appendResponseLine(`**Filter**: ${result.filter}`);
+  }
+  response.appendResponseLine(`**Total Events Captured**: ${result.totalEvents}`);
+  response.appendResponseLine(
+    `**New Events Since Last Read**: ${result.newEvents}`,
+  );
   response.appendResponseLine('');
 
-  if (events.length > 0) {
-    response.appendResponseLine('### Captured Events');
-    response.appendResponseLine('```json');
-    response.appendResponseLine(JSON.stringify(events, null, 2));
-    response.appendResponseLine('```');
+  if (lastN) {
+    response.appendResponseLine(`**Showing**: Last ${lastN} events`);
+  } else if (returnAll) {
+    response.appendResponseLine('**Showing**: All events');
   } else {
-    response.appendResponseLine('No events captured during monitoring period.');
+    response.appendResponseLine('**Showing**: New events only');
+  }
+  response.appendResponseLine('');
+
+  if (result.events.length === 0) {
+    response.appendResponseLine('📭 **No events to display**');
     response.appendResponseLine('');
     response.appendResponseLine('**Suggestions**:');
+    response.appendResponseLine('- Interact with the page to trigger events');
+    response.appendResponseLine('- Check if dataLayer/gtag are being used');
     response.appendResponseLine(
-      '- Interact with the page to trigger events',
+      '- Use `returnAll: true` to see all captured events',
     );
-    response.appendResponseLine('- Increase monitoring duration');
-    response.appendResponseLine('- Check if events are being pushed to dataLayer');
+  } else {
+    response.appendResponseLine(
+      `📊 **${result.events.length} Event(s) Captured**:`,
+    );
+    response.appendResponseLine('');
+
+    // Display events in a readable format
+    for (const event of result.events) {
+      response.appendResponseLine(`### Event ${event.id}`);
+      response.appendResponseLine(`- **Timestamp**: ${event.timestamp}`);
+      response.appendResponseLine(`- **Source**: ${event.source}`);
+      if (event.data.event) {
+        response.appendResponseLine(`- **Event Name**: ${event.data.event}`);
+      }
+      response.appendResponseLine(`- **URL**: ${event.url}`);
+      response.appendResponseLine('- **Data**:');
+      response.appendResponseLine('```json');
+      response.appendResponseLine(JSON.stringify(event.data, null, 2));
+      response.appendResponseLine('```');
+      response.appendResponseLine('');
+    }
   }
+
+  response.appendResponseLine('---');
+  response.appendResponseLine('');
+  response.appendResponseLine('**Next steps:**');
+  response.appendResponseLine(
+    '- Call `get_events` again to see new events (incremental)',
+  );
+  response.appendResponseLine(
+    '- Use `returnAll: true` to see all events again',
+  );
+  response.appendResponseLine(
+    '- Use `lastN: 10` to see last 10 events only',
+  );
+  response.appendResponseLine('- Use `stop_monitoring` when done');
 }
 
 async function stopMonitoring(page: any, response: any) {
-  const result = await page.evaluate(() => {
-    const w = window as any;
-    const monitorKey = '__BROWSEROS_ANALYTICS_MONITOR__';
+  const result = await page.evaluate((KEYS: any) => {
+    const wasActive = localStorage.getItem(KEYS.MONITORING_ACTIVE) === 'true';
 
-    if (w[monitorKey]) {
-      delete w[monitorKey];
-      return {stopped: true};
+    if (!wasActive) {
+      return {
+        stopped: false,
+        eventsCount: 0,
+      };
     }
-    return {stopped: false};
-  });
+
+    // Get final event count before cleanup
+    const events = JSON.parse(localStorage.getItem(KEYS.EVENTS) || '[]');
+    const eventsCount = events.length;
+
+    // Clean up all monitoring data from localStorage
+    Object.values(KEYS).forEach((key: any) => {
+      localStorage.removeItem(key);
+    });
+
+    return {
+      stopped: true,
+      eventsCount: eventsCount,
+    };
+  }, STORAGE_KEYS);
 
   response.appendResponseLine('## Event Monitoring Stopped');
   response.appendResponseLine('');
 
   if (result.stopped) {
+    response.appendResponseLine('✅ **Monitoring stopped and cleaned up**');
+    response.appendResponseLine('');
     response.appendResponseLine(
-      'Event monitoring has been stopped and cleanup completed.',
+      `- **Total events captured**: ${result.eventsCount}`,
+    );
+    response.appendResponseLine('- **All monitoring data**: Cleared from localStorage');
+    response.appendResponseLine('- **Proxy listeners**: Removed');
+    response.appendResponseLine('');
+    response.appendResponseLine(
+      '**Note**: You can start monitoring again with `start_monitoring`',
     );
   } else {
+    response.appendResponseLine('ℹ️ **No active monitoring found**');
+    response.appendResponseLine('');
+    response.appendResponseLine('Nothing to clean up.');
+    response.appendResponseLine('');
     response.appendResponseLine(
-      'No active monitoring found. Nothing to clean up.',
+      'Use `start_monitoring` to begin tracking events.',
     );
   }
 }
