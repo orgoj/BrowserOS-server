@@ -684,9 +684,14 @@ async function startMonitoring(
         window.__BROWSEROS_ORIGINAL_PUSH__ = window.dataLayer.push;
         window.dataLayer.push = function(...args) {
           // Capture events (async, non-blocking)
-          args.forEach(item => {
-            captureEvent(item, 'dataLayer');
-          });
+          // Wrapped in try-catch to ensure GTM NEVER breaks
+          try {
+            args.forEach(item => {
+              captureEvent(item, 'dataLayer');
+            });
+          } catch (e) {
+            console.error('[BrowserOS Analytics] Capture error (non-fatal):', e);
+          }
 
           // CRITICAL: Call original push with exact same context and args
           // This ensures GTM sees identical behavior and timing
@@ -702,10 +707,15 @@ async function startMonitoring(
         window.__BROWSEROS_ORIGINAL_GTAG__ = window.gtag;
         window.gtag = function(...args) {
           // Capture gtag calls (async, non-blocking)
-          captureEvent({
-            command: args[0],
-            params: args.slice(1)
-          }, 'gtag');
+          // Wrapped in try-catch to ensure GA4 NEVER breaks
+          try {
+            captureEvent({
+              command: args[0],
+              params: args.slice(1)
+            }, 'gtag');
+          } catch (e) {
+            console.error('[BrowserOS Analytics] Capture error (non-fatal):', e);
+          }
 
           // CRITICAL: Call original gtag with exact same context and args
           // This ensures GA4 sees identical behavior and timing
