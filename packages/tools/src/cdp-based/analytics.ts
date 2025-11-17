@@ -552,6 +552,29 @@ async function startMonitoring(
         localStorage.setItem(KEYS.EVENTS, JSON.stringify([]));
       }
 
+      // Safe deep clone that handles circular references
+      function safeDeepClone(obj, seen = new WeakSet()) {
+        if (obj === null || typeof obj !== 'object') return obj;
+        if (seen.has(obj)) return '[Circular Reference]';
+
+        seen.add(obj);
+
+        if (Array.isArray(obj)) {
+          return obj.map(item => safeDeepClone(item, seen));
+        }
+
+        const cloned = {};
+        for (const key in obj) {
+          try {
+            cloned[key] = safeDeepClone(obj[key], seen);
+          } catch (e) {
+            cloned[key] = '[Clone Error]';
+          }
+        }
+
+        return cloned;
+      }
+
       // Sanitize PII from event data for privacy/compliance
       function sanitizePII(obj) {
         if (typeof obj !== 'object' || obj === null) return obj;
@@ -617,7 +640,8 @@ async function startMonitoring(
         queueMicrotask(() => {
           try {
             // Deep clone happens here (async, doesn't block GTM/GA4)
-            const clonedData = JSON.parse(JSON.stringify(data));
+            // Use safe clone to handle circular references gracefully
+            const clonedData = safeDeepClone(data);
 
             // Sanitize PII for privacy/compliance
             const sanitizedData = sanitizePII(clonedData);
