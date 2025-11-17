@@ -1,25 +1,6 @@
 /**
  * @license
  * Copyright 2025 BrowserOS
- *
- * Web Analytics Tool - READ-ONLY analytics inspection
- *
- * SAFETY GUARANTEES:
- * - This tool is completely READ-ONLY
- * - Does NOT modify window.dataLayer, GTM, or GA4 configurations
- * - Does NOT interfere with analytics tracking
- * - ZERO performance impact on GTM/GA4 (async storage with queueMicrotask)
- * - Uses transparent proxy pattern (same as Google Tag Assistant, Segment, Heap)
- * - Monitoring uses isolated namespace (__BROWSEROS_ANALYTICS_*)
- * - Automatic cleanup ensures no traces are left on the page
- * - All analysis is passive observation only
- *
- * IMPLEMENTATION DETAILS (Best Practices):
- * - Proxy pattern: Preserves original function behavior and return values
- * - Async storage: localStorage operations happen in queueMicrotask (non-blocking)
- * - Deep cloning: Prevents mutations from affecting captured data
- * - Error isolation: Try-catch ensures failures don't break GTM/GA4
- * - Sync filtering: Event filters applied immediately to minimize async work
  */
 import z from 'zod';
 
