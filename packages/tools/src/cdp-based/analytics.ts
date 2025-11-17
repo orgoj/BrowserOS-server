@@ -588,7 +588,7 @@ async function startMonitoring(
           else if (typeof value === 'string') {
             let sanitizedValue = value;
             for (const [type, pattern] of Object.entries(piiPatterns)) {
-              sanitizedValue = sanitizedValue.replace(pattern, `[${type.toUpperCase()}_REDACTED]`);
+              sanitizedValue = sanitizedValue.replace(pattern, '[' + type.toUpperCase() + '_REDACTED]');
             }
             sanitized[key] = sanitizedValue;
           }
