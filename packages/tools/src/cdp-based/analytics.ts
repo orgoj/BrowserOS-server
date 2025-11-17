@@ -600,7 +600,8 @@ async function startMonitoring(
       // This is the same pattern used by Google Tag Assistant, Segment, Heap, etc.
       // GUARANTEES: Zero performance impact on GTM (async storage)
       if (window.dataLayer && Array.isArray(window.dataLayer)) {
-        const originalPush = window.dataLayer.push;
+        // Store original function for cleanup
+        window.__BROWSEROS_ORIGINAL_PUSH__ = window.dataLayer.push;
         window.dataLayer.push = function(...args) {
           // Capture events (async, non-blocking)
           args.forEach(item => {
@@ -609,7 +610,7 @@ async function startMonitoring(
 
           // CRITICAL: Call original push with exact same context and args
           // This ensures GTM sees identical behavior and timing
-          return originalPush.apply(this, args);
+          return window.__BROWSEROS_ORIGINAL_PUSH__.apply(this, args);
         };
         console.log('[BrowserOS Analytics] Monitoring dataLayer.push()');
       }
@@ -617,7 +618,8 @@ async function startMonitoring(
       // Monitor gtag() using transparent proxy pattern
       // GUARANTEES: Zero performance impact on GA4 (async storage)
       if (typeof window.gtag === 'function') {
-        const originalGtag = window.gtag;
+        // Store original function for cleanup
+        window.__BROWSEROS_ORIGINAL_GTAG__ = window.gtag;
         window.gtag = function(...args) {
           // Capture gtag calls (async, non-blocking)
           captureEvent({
@@ -627,7 +629,7 @@ async function startMonitoring(
 
           // CRITICAL: Call original gtag with exact same context and args
           // This ensures GA4 sees identical behavior and timing
-          return originalGtag.apply(this, args);
+          return window.__BROWSEROS_ORIGINAL_GTAG__.apply(this, args);
         };
         console.log('[BrowserOS Analytics] Monitoring gtag()');
       }
@@ -815,6 +817,19 @@ async function stopMonitoring(page: any, response: any) {
     // Get final event count before cleanup
     const events = JSON.parse(localStorage.getItem(KEYS.EVENTS) || '[]');
     const eventsCount = events.length;
+
+    // Restore original functions to prevent memory leaks
+    if (window.__BROWSEROS_ORIGINAL_PUSH__ && window.dataLayer) {
+      window.dataLayer.push = window.__BROWSEROS_ORIGINAL_PUSH__;
+      delete window.__BROWSEROS_ORIGINAL_PUSH__;
+    }
+    if (window.__BROWSEROS_ORIGINAL_GTAG__) {
+      window.gtag = window.__BROWSEROS_ORIGINAL_GTAG__;
+      delete window.__BROWSEROS_ORIGINAL_GTAG__;
+    }
+
+    // Clean up window flags
+    delete window.__BROWSEROS_MONITORING_SETUP__;
 
     // Clean up all monitoring data from localStorage
     Object.values(KEYS).forEach((key: any) => {
