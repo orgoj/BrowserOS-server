@@ -535,19 +535,19 @@ async function startMonitoring(
     (function() {
       const KEYS = ${JSON.stringify(STORAGE_KEYS)};
 
-      // Check if already monitoring
-      if (localStorage.getItem(KEYS.MONITORING_ACTIVE) === 'true') {
-        console.log('[BrowserOS Analytics] Monitoring already active');
+      // Check if monitoring proxies are already installed on THIS page instance
+      if (window.__BROWSEROS_MONITORING_SETUP__) {
         return;
       }
+      window.__BROWSEROS_MONITORING_SETUP__ = true;
 
-      // Initialize storage
-      localStorage.setItem(KEYS.MONITORING_ACTIVE, 'true');
-      localStorage.setItem(KEYS.EVENT_FILTER, ${JSON.stringify(eventFilter || '')});
-      localStorage.setItem(KEYS.LAST_READ_INDEX, '0');
-      localStorage.setItem(KEYS.NEXT_EVENT_ID, '1');
-
-      if (!localStorage.getItem(KEYS.EVENTS)) {
+      // Initialize storage only if this is the first time starting monitoring
+      const isFirstTime = localStorage.getItem(KEYS.MONITORING_ACTIVE) !== 'true';
+      if (isFirstTime) {
+        localStorage.setItem(KEYS.MONITORING_ACTIVE, 'true');
+        localStorage.setItem(KEYS.EVENT_FILTER, ${JSON.stringify(eventFilter || '')});
+        localStorage.setItem(KEYS.LAST_READ_INDEX, '0');
+        localStorage.setItem(KEYS.NEXT_EVENT_ID, '1');
         localStorage.setItem(KEYS.EVENTS, JSON.stringify([]));
       }
 
