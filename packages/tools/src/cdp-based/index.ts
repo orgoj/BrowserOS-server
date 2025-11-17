@@ -4,6 +4,7 @@
  */
 import type {ToolDefinition} from '../types/ToolDefinition.js';
 
+import * as analyticsTools from './analytics.js';
 import * as consoleTools from './console.js';
 import * as emulationTools from './emulation.js';
 import * as inputTools from './input.js';
@@ -21,6 +22,7 @@ import * as snapshotTools from './snapshot.js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const allCdpTools: Array<ToolDefinition<any>> = [
   //FIXME: nikhil - figure out the better wway to enable/disable tools
+  ...Object.values(analyticsTools),
   ...Object.values(consoleTools),
   // ...Object.values(emulationTools),
   // ...Object.values(inputTools),
@@ -34,6 +36,7 @@ export const allCdpTools: Array<ToolDefinition<any>> = [
 ];
 
 // Re-export individual tool modules for selective imports
+export * as analytics from './analytics.js';
 export * as console from './console.js';
 export * as emulation from './emulation.js';
 export * as input from './input.js';

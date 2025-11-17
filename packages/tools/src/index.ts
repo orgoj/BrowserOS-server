@@ -27,6 +27,7 @@ export {McpResponse} from './response/index.js';
 export * as formatters from './formatters/index.js';
 
 // Re-export specific CDP tool categories for direct import
+export {analytics} from './cdp-based/index.js';
 export {console} from './cdp-based/index.js';
 export {emulation} from './cdp-based/index.js';
 export {input} from './cdp-based/index.js';

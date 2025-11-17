@@ -25,4 +25,5 @@ export enum ToolCategories {
   COORDINATES = 'Coordinate-based',
   BOOKMARKS = 'Bookmark Management',
   HISTORY = 'History Management',
+  ANALYTICS = 'Analytics',
 }
