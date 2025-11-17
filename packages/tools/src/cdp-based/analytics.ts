@@ -552,6 +552,50 @@ async function startMonitoring(
         localStorage.setItem(KEYS.EVENTS, JSON.stringify([]));
       }
 
+      // Sanitize PII from event data for privacy/compliance
+      function sanitizePII(obj) {
+        if (typeof obj !== 'object' || obj === null) return obj;
+
+        const sanitized = Array.isArray(obj) ? [] : {};
+        const piiPatterns = {
+          email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+          creditCard: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g,
+          ssn: /\b\d{3}-\d{2}-\d{4}\b/g,
+          phone: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g,
+          ipv4: /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+        };
+
+        for (const key in obj) {
+          const value = obj[key];
+          const lowerKey = String(key).toLowerCase();
+
+          // Redact sensitive keys entirely
+          if (lowerKey.includes('password') || lowerKey.includes('token') ||
+              lowerKey.includes('secret') || lowerKey.includes('key') ||
+              lowerKey.includes('auth') || lowerKey.includes('api')) {
+            sanitized[key] = '[REDACTED]';
+          }
+          // Recursively sanitize objects
+          else if (typeof value === 'object' && value !== null) {
+            sanitized[key] = sanitizePII(value);
+          }
+          // Sanitize string values with PII patterns
+          else if (typeof value === 'string') {
+            let sanitizedValue = value;
+            for (const [type, pattern] of Object.entries(piiPatterns)) {
+              sanitizedValue = sanitizedValue.replace(pattern, `[${type.toUpperCase()}_REDACTED]`);
+            }
+            sanitized[key] = sanitizedValue;
+          }
+          // Keep other values as-is
+          else {
+            sanitized[key] = value;
+          }
+        }
+
+        return sanitized;
+      }
+
       // Helper to capture event with metadata
       // Uses async storage to avoid blocking GTM/GA4 performance
       function captureEvent(data, source) {
@@ -573,11 +617,16 @@ async function startMonitoring(
         queueMicrotask(() => {
           try {
             // Deep clone happens here (async, doesn't block GTM/GA4)
+            const clonedData = JSON.parse(JSON.stringify(data));
+
+            // Sanitize PII for privacy/compliance
+            const sanitizedData = sanitizePII(clonedData);
+
             const eventSnapshot = {
               timestamp: captureTime,
               timestampMs: captureTimeMs,
               source: source,
-              data: JSON.parse(JSON.stringify(data)),
+              data: sanitizedData,
               url: captureUrl,
             };
 
