@@ -191,32 +191,180 @@ describe('analytics', () => {
     });
   });
 
-  it('web_analytics - monitor_events', async () => {
+  it('web_analytics - start_monitoring', async () => {
     await withBrowser(async (response, context) => {
       const page = context.getSelectedPage();
 
       await page.setContent(html`
         <script>
           window.dataLayer = window.dataLayer || [];
-          setTimeout(() => {
-            window.dataLayer.push({event: 'delayed_event', value: 42});
-          }, 500);
         </script>
       `);
 
       await webAnalytics.handler(
-        {params: {action: 'monitor_events', duration: 2}},
+        {params: {action: 'start_monitoring'}},
         response,
         context,
       );
 
       const responseText = response.responseLines.join('\n');
-      assert.ok(responseText.includes('Event Monitoring'));
-      assert.ok(responseText.includes('Captured'));
+      assert.ok(responseText.includes('Start Event Monitoring'));
+      assert.ok(responseText.includes('Monitoring started successfully'));
+    });
+  });
+
+  it('web_analytics - start_monitoring with filter', async () => {
+    await withBrowser(async (response, context) => {
+      const page = context.getSelectedPage();
+
+      await page.setContent(html`
+        <script>
+          window.dataLayer = window.dataLayer || [];
+        </script>
+      `);
+
+      await webAnalytics.handler(
+        {params: {action: 'start_monitoring', eventFilter: 'purchase'}},
+        response,
+        context,
+      );
+
+      const responseText = response.responseLines.join('\n');
+      assert.ok(responseText.includes('Filter'));
+      assert.ok(responseText.includes('purchase'));
+    });
+  });
+
+  it('web_analytics - get_events after monitoring started', async () => {
+    await withBrowser(async (response, context) => {
+      const page = context.getSelectedPage();
+
+      await page.setContent(html`
+        <script>
+          window.dataLayer = window.dataLayer || [];
+        </script>
+      `);
+
+      // Start monitoring
+      await webAnalytics.handler(
+        {params: {action: 'start_monitoring'}},
+        response,
+        context,
+      );
+
+      // Push some events
+      await page.evaluate(() => {
+        window.dataLayer.push({event: 'page_view', page: '/home'});
+        window.dataLayer.push({event: 'click', element: 'button'});
+      });
+
+      response.resetResponseLineForTesting();
+
+      // Get events
+      await webAnalytics.handler(
+        {params: {action: 'get_events'}},
+        response,
+        context,
+      );
+
+      const responseText = response.responseLines.join('\n');
+      assert.ok(responseText.includes('Captured Analytics Events'));
+      assert.ok(responseText.includes('Monitoring Status'));
+      assert.ok(responseText.includes('Active'));
+    });
+  });
+
+  it('web_analytics - get_events without monitoring', async () => {
+    await withBrowser(async (response, context) => {
+      const page = context.getSelectedPage();
+
+      await page.setContent(html`
+        <script>
+          window.dataLayer = window.dataLayer || [];
+        </script>
+      `);
+
+      await webAnalytics.handler(
+        {params: {action: 'get_events'}},
+        response,
+        context,
+      );
+
+      const responseText = response.responseLines.join('\n');
+      assert.ok(
+        responseText.includes('Monitoring not active') ||
+          responseText.includes('start_monitoring'),
+      );
+    });
+  });
+
+  it('web_analytics - get_events with returnAll option', async () => {
+    await withBrowser(async (response, context) => {
+      const page = context.getSelectedPage();
+
+      await page.setContent(html`
+        <script>
+          window.dataLayer = window.dataLayer || [];
+        </script>
+      `);
+
+      await webAnalytics.handler(
+        {params: {action: 'start_monitoring'}},
+        response,
+        context,
+      );
+
+      await page.evaluate(() => {
+        window.dataLayer.push({event: 'test_event'});
+      });
+
+      response.resetResponseLineForTesting();
+
+      await webAnalytics.handler(
+        {params: {action: 'get_events', returnAll: true}},
+        response,
+        context,
+      );
+
+      const responseText = response.responseLines.join('\n');
+      assert.ok(responseText.includes('Showing'));
+      assert.ok(responseText.includes('All events'));
     });
   });
 
   it('web_analytics - stop_monitoring', async () => {
+    await withBrowser(async (response, context) => {
+      const page = context.getSelectedPage();
+
+      await page.setContent(html`
+        <script>
+          window.dataLayer = window.dataLayer || [];
+        </script>
+      `);
+
+      // Start monitoring first
+      await webAnalytics.handler(
+        {params: {action: 'start_monitoring'}},
+        response,
+        context,
+      );
+
+      response.resetResponseLineForTesting();
+
+      // Stop monitoring
+      await webAnalytics.handler(
+        {params: {action: 'stop_monitoring'}},
+        response,
+        context,
+      );
+
+      const responseText = response.responseLines.join('\n');
+      assert.ok(responseText.includes('Event Monitoring Stopped'));
+      assert.ok(responseText.includes('stopped and cleaned up'));
+    });
+  });
+
+  it('web_analytics - stop_monitoring without active monitoring', async () => {
     await withBrowser(async (response, context) => {
       const page = context.getSelectedPage();
 
@@ -233,7 +381,7 @@ describe('analytics', () => {
       );
 
       const responseText = response.responseLines.join('\n');
-      assert.ok(responseText.includes('Event Monitoring Stopped'));
+      assert.ok(responseText.includes('No active monitoring found'));
     });
   });
 
