@@ -562,19 +562,24 @@ async function startMonitoring(
           return;
         }
 
-        // Create shallow copy of data SYNCHRONOUSLY (fast)
-        const eventSnapshot = {
-          timestamp: new Date().toISOString(),
-          timestampMs: Date.now(),
-          source: source,
-          data: JSON.parse(JSON.stringify(data)), // Deep clone to prevent mutations
-          url: window.location.href,
-        };
+        // Capture only metadata SYNCHRONOUSLY (fast, non-blocking)
+        const captureTime = new Date().toISOString();
+        const captureTimeMs = Date.now();
+        const captureUrl = window.location.href;
 
-        // Store to localStorage ASYNCHRONOUSLY (non-blocking)
+        // ALL expensive operations happen ASYNCHRONOUSLY (non-blocking)
         // This ensures GTM/GA4 get ZERO performance impact
         queueMicrotask(() => {
           try {
+            // Deep clone happens here (async, doesn't block GTM/GA4)
+            const eventSnapshot = {
+              timestamp: captureTime,
+              timestampMs: captureTimeMs,
+              source: source,
+              data: JSON.parse(JSON.stringify(data)),
+              url: captureUrl,
+            };
+
             const events = JSON.parse(localStorage.getItem(KEYS.EVENTS) || '[]');
             const eventId = parseInt(localStorage.getItem(KEYS.NEXT_EVENT_ID) || '1');
 
